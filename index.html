@@ -190,7 +190,7 @@
       imageBox.innerHTML = "Loading...";
 
       try {
-        const response = await retryLLMRequest("http://localhost:4500/api/generate-image", {
+        const response = await retryLLMRequest("https://logisketch-demo-server-v1.onrender.com/api/generate-image", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
