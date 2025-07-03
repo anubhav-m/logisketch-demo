@@ -4,37 +4,215 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LogiSketch Frontend Test</title>
+  <title>Logisketch Frontend Demo</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0f0f1a;
+      color: #ffffff;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    header {
+      padding: 1rem;
+      text-align: center;
+      background: linear-gradient(90deg, #6a00f4, #8e2de2);
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      padding: 1.5rem;
+      gap: 1rem;
+    }
+
+    select,
+    textarea,
+    button {
+      background-color: #1e1e2f;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 8px;
+      padding: 0.5rem;
+      font-size: 1rem;
+    }
+
+    select {
+      width: 200px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 150px;
+      resize: vertical;
+    }
+
+    button {
+      width: 150px;
+      background-color: #8e2de2;
+      cursor: pointer;
+      border: none;
+      margin-top: 0.5rem;
+    }
+
+    .dropdowns {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .output {
+      display: flex;
+      gap: 1rem;
+      height: 400px;
+    }
+
+    .code-box,
+    .image-box {
+      flex: 1;
+      background-color: #1a1a2e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 1rem;
+      overflow: auto;
+    }
+
+    .code-box {
+      color: #8aff80;
+      font-family: 'Courier New', Courier, monospace;
+      white-space: pre-wrap;
+    }
+
+    .image-box {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+  </style>
 </head>
 
 <body>
-  <h1>LogiSketch - Generate Image</h1>
-  <button onclick="generateImage()">Generate Image</button>
-  <pre id="result"></pre>
+  <header>🧠 Logisketch</header>
+  <div class="container">
+    <div class="dropdowns">
+      <label for="model">Model:</label>
+      <select id="model">
+        <option>meta-llama/llama-4-scout-17b-16e-instruct</option>
+        <option>llama-3.3-70b-versatile</option>
+        <option>llama-3.1-8b-instant</option>
+        <option>meta-llama/llama-4-maverick-17b-128e-instruct</option>
+        <option>mistralai/mistral-small-3.2-24b-instruct-2506:free</option>
+      </select>
+
+      <label for="engine">Engine:</label>
+      <select id="engine">
+        <option>plantuml</option>
+        <option>mermaid</option>
+        <option>graphviz</option>
+        <option>structurizr</option>
+        <option>blockdiag</option>
+        <option>seqdiag</option>
+        <option>packetdiag</option>
+        <option>c4</option>
+        <option>d2</option>
+        <option>erd</option>
+        <option>nomnoml</option>
+        <option>tikz</option>
+        <option>vega-lite</option>
+        <option>symbolator</option>
+        <option>wavedrom</option>
+      </select>
+    </div>
+
+    <textarea id="prompt" placeholder="Enter your diagram prompt here..."></textarea>
+    <button onclick="generateDiagram()">Generate</button>
+
+    <div class="output">
+      <div class="code-box" id="codeBox">Waiting for output...</div>
+      <div class="image-box" id="imageBox">Image will appear here.</div>
+    </div>
+  </div>
 
   <script>
-    async function generateImage() {
+    async function retryLLMRequest(url, options, timeoutMs = 10000) {
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < timeoutMs) {
+        try {
+          const res = await fetch(url, options);
+
+          // If not OK, log and retry
+          if (!res.ok) {
+            const contentType = res.headers.get("Content-Type") || "";
+            const errText = contentType.includes("application/json")
+              ? JSON.stringify(await res.json())
+              : await res.text();
+            console.warn(`Retrying... ${res.status}: ${errText}`);
+            continue;
+          }
+
+          // Only try parsing JSON on valid success
+          const result = await res.json();
+          return { success: true, ...result };
+
+        } catch (err) {
+          console.warn("Retrying due to error:", err.message);
+          continue;
+        }
+      }
+
+      // Timeout expired, return failure
+      return {
+        success: false,
+        error: "Request failed after retrying for 10 seconds. Likely cause: LLM generated invalid code (400 error)."
+      };
+    }
+
+
+    async function generateDiagram() {
+      const model = document.getElementById("model").value;
+      const engine = document.getElementById("engine").value;
+      const promptText = document.getElementById("prompt").value;
+      const codeBox = document.getElementById("codeBox");
+      const imageBox = document.getElementById("imageBox");
+
+      codeBox.textContent = "Generating...";
+      imageBox.innerHTML = "Loading...";
+
       try {
-        const response = await fetch('https://logisketch-demo-server-v1.onrender.com/api/generate-image', {
-          method: 'POST',
+        const response = await retryLLMRequest("http://localhost:4500/api/generate-image", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json'
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            "prompt": {
-              "text": "Create a CI/CD pipeline diagram with key stages and tool relationships."
-            },
-            "model": "llama-3.3-70b-versatile",
-            "engine": "plantuml"
+            prompt: { text: promptText },
+            model: model,
+            engine: engine
           })
         });
-      
 
-        const data = await response.json();
-        console.log(data.svg);
-        document.getElementById('result').innerText = JSON.stringify(data, null, 2);
+
+        if (response.success) {
+          codeBox.textContent = response.code;
+          imageBox.innerHTML = `<img src="data:image/svg+xml;base64,${btoa(response.svg)}" alt="Diagram" />`;
+        } else {
+          codeBox.textContent = "Error: " + response.error;
+          imageBox.innerHTML = "❌";
+        }
       } catch (err) {
-        document.getElementById('result').innerText = `Error: ${err.message}`;
+        codeBox.textContent = "Error: " + err.message;
+        imageBox.innerHTML = "❌";
       }
     }
   </script>
